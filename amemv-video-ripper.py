@@ -13,6 +13,8 @@ from six.moves import queue as Queue
 from threading import Thread
 import json
 import time
+import jsonutils
+from modal import ComUser
 
 HEADERS = {
     'accept-encoding': 'gzip, deflate, br',
@@ -53,7 +55,26 @@ def getRemoteFileSize(url, proxy=None):
         return int(fileSize)
 
 
-def download(medium_type, uri, medium_url, target_folder, target_desc_folder, desc):
+def saveComUser(user_id, desc, v_url, v_size):
+    user = None
+    for key in usermap:
+        if(usermap[key]["user_id"] == user_id):
+            user = usermap[key]
+            break
+    try:
+        ComUser(user_id=user_id, user_url=user["user_url"], real_url=user["real_url"],
+                tags=user["tags"], v_url=v_url, v_size=v_size, desc=desc).save()
+        print('insert db successs')
+    except:
+        print('insert db error')
+
+
+def download(medium_type, uri, medium_url, target_folder, desc, user_id):
+    # todo db is exist return
+    query = ComUser.select().where((ComUser.user_id == user_id) & (ComUser.v_uri == uri))
+    for pet in query:
+        return
+
     headers = copy.deepcopy(HEADERS)
     file_name = uri
     if medium_type == 'video':
@@ -66,12 +87,12 @@ def download(medium_type, uri, medium_url, target_folder, target_desc_folder, de
         return
 
     file_path = os.path.join(target_folder, file_name)
-    desc_file_path = os.path.join(target_desc_folder, uri+".txt")
-    if os.path.isfile(file_path):
-        remoteSize = getRemoteFileSize(medium_url)
-        localSize = os.path.getsize(file_path)
-        if remoteSize == localSize:
-            return
+    remoteSize = getRemoteFileSize(medium_url)
+    # if os.path.isfile(file_path):
+    #     remoteSize = getRemoteFileSize(medium_url)
+    #     localSize = os.path.getsize(file_path)
+    #     if remoteSize == localSize:
+    #         return
     print("Downloading %s from %s.\n" % (file_name, medium_url))
     retry_times = 0
     while retry_times < RETRY:
@@ -85,8 +106,10 @@ def download(medium_type, uri, medium_url, target_folder, target_desc_folder, de
             with open(file_path, 'wb') as fh:
                 for chunk in resp.iter_content(chunk_size=1024):
                     fh.write(chunk)
-            with codecs.open(desc_file_path, "w", "utf-8-sig") as descFS:
-                descFS.write(desc)
+            
+            # todo save user
+            saveComUser(user_id, desc, medium_url, remoteSize)
+
             break
         except:
             pass
@@ -97,6 +120,8 @@ def download(medium_type, uri, medium_url, target_folder, target_desc_folder, de
         except OSError:
             pass
         print("Failed to retrieve %s from %s.\n" % (uri, medium_url))
+    
+    
     time.sleep(1)
 
 
@@ -128,9 +153,9 @@ class DownloadWorker(Thread):
 
     def run(self):
         while True:
-            medium_type, uri, download_url, target_folder, target_desc_folder, desc = self.queue.get()
-            # print(medium_type, uri, download_url, target_folder)
-            download(medium_type, uri, download_url, target_folder, target_desc_folder, desc)
+            medium_type, uri, download_url, target_folder, desc, user_id = self.queue.get()
+            download(medium_type, uri, download_url,
+                     target_folder, desc, user_id)
             self.queue.task_done()
 
 
@@ -141,9 +166,17 @@ class CrawlerScheduler(object):
         self.challenges = []
         self.musics = []
         for i in range(len(items)):
-            url = get_real_address(items[i])
+            # user_url
+            user_url = items[i]['url']
+            # real_url
+            url = get_real_address(user_url)
             if not url:
                 continue
+            # todo user_url to real_url
+            usermap[user_url] = {"user_url": user_url, "real_url": url, "tags": items[i]['tags']}
+            # todo real_url to user_url
+            realmap[url] = user_url
+
             if re.search('share/user', url):
                 self.numbers.append(url)
             if re.search('share/challenge', url):
@@ -181,6 +214,8 @@ class CrawlerScheduler(object):
         if hostname != 't.tiktok.com' and not dytk:
             return
         user_id = number[0]
+        user_url = realmap[url]
+        usermap[user_url]["user_id"] = user_id
         video_count = self._download_user_media(user_id, dytk, url)
         self.queue.join()
         print("\nAweme number %s, video number %s\n\n" %
@@ -209,7 +244,8 @@ class CrawlerScheduler(object):
               (musics_id, video_count))
         print("\nFinish Downloading All the videos from @%s\n\n" % musics_id)
 
-    def _join_download_queue(self, aweme, target_folder, target_desc_folder):
+    # todo user_id value is user_id or channel_id
+    def _join_download_queue(self, aweme, target_folder, user_id):
         try:
             if aweme.get('video', None):
                 uri = aweme['video']['play_addr']['uri']
@@ -246,16 +282,17 @@ class CrawlerScheduler(object):
                         'tz_offset': '28800'
                     }
                 share_info = aweme.get('share_info', {})
+                # todo desc
                 desc = aweme.get('desc', '')
                 url = download_url.format(
                     '&'.join([key + '=' + download_params[key] for key in download_params]))
                 self.queue.put(('video', share_info.get(
-                    'share_desc', uri), url, target_folder, target_desc_folder, desc))
+                    'share_desc', uri), url, target_folder, desc, user_id))
             else:
                 if aweme.get('image_infos', None):
                     image = aweme['image_infos']['label_large']
                     self.queue.put(
-                        ('image', image['uri'], image['url_list'][0], target_folder, target_desc_folder, ''))
+                        ('image', image['uri'], image['url_list'][0], target_folder))
 
         except KeyError:
             return
@@ -263,10 +300,9 @@ class CrawlerScheduler(object):
             print("Cannot decode response data from DESC %s" % aweme['desc'])
             return
 
-    def __download_favorite_media(self, user_id, dytk, hostname, signature, favorite_folder, video_count, target_desc_folder):
+    def __download_favorite_media(self, user_id, dytk, hostname, signature, favorite_folder, video_count):
         if not os.path.exists(favorite_folder):
             os.makedirs(favorite_folder)
-            
         url = "https://%s/web/api/v2/aweme/like/" % hostname
         params = {
             'user_id': str(user_id),
@@ -289,7 +325,7 @@ class CrawlerScheduler(object):
             for aweme in favorite_list:
                 video_count += 1
                 aweme['hostname'] = hostname
-                self._join_download_queue(aweme, favorite_folder, target_desc_folder)
+                self._join_download_queue(aweme, favorite_folder, user_id)
             if not res.get('has_more'):
                 break
             max_cursor = res.get('max_cursor')
@@ -300,10 +336,6 @@ class CrawlerScheduler(object):
         target_folder = os.path.join(current_folder, 'download/%s' % user_id)
         if not os.path.isdir(target_folder):
             os.mkdir(target_folder)
-        # desc folder
-        target_desc_folder = os.path.join(target_folder, 'desc/')
-        if not os.path.isdir(target_desc_folder):
-            os.mkdir(target_desc_folder)
 
         if not user_id:
             print("Number %s does not exist" % user_id)
@@ -336,7 +368,7 @@ class CrawlerScheduler(object):
             for aweme in aweme_list:
                 video_count += 1
                 aweme['hostname'] = hostname
-                self._join_download_queue(aweme, target_folder, target_desc_folder)
+                self._join_download_queue(aweme, target_folder, user_id)
             if not res.get('has_more'):
                 break
             max_cursor = res.get('max_cursor')
@@ -353,7 +385,7 @@ class CrawlerScheduler(object):
         if DOWNLOAD_FAVORITE:
             favorite_folder = target_folder + '/favorite'
             video_count = self.__download_favorite_media(
-                user_id, dytk, hostname, signature, favorite_folder, video_count,target_desc_folder)
+                user_id, dytk, hostname, signature, favorite_folder, video_count)
 
         if video_count == 0:
             print("There's no video in number %s." % user_id)
@@ -369,10 +401,6 @@ class CrawlerScheduler(object):
             current_folder, 'download/#%s' % challenge_id)
         if not os.path.isdir(target_folder):
             os.mkdir(target_folder)
-            
-        target_desc_folder = os.path.join(target_folder, 'desc/')
-        if not os.path.isdir(target_desc_folder):
-            os.mkdir(target_desc_folder)
 
         hostname = urllib.parse.urlparse(url).hostname
         signature = self.generateSignature(str(challenge_id) + '9' + '0')
@@ -403,7 +431,7 @@ class CrawlerScheduler(object):
             for aweme in aweme_list:
                 aweme['hostname'] = hostname
                 video_count += 1
-                self._join_download_queue(aweme, target_folder,target_desc_folder)
+                self._join_download_queue(aweme, target_folder, challenge_id)
             if res.get('has_more'):
                 cursor = res.get('cursor')
             else:
@@ -420,10 +448,6 @@ class CrawlerScheduler(object):
         target_folder = os.path.join(current_folder, 'download/@%s' % music_id)
         if not os.path.isdir(target_folder):
             os.mkdir(target_folder)
-        # desc
-        target_desc_folder = os.path.join(target_folder, 'desc/')
-        if not os.path.isdir(target_desc_folder):
-            os.mkdir(target_desc_folder)
 
         hostname = urllib.parse.urlparse(url).hostname
         signature = self.generateSignature(str(music_id))
@@ -457,7 +481,7 @@ class CrawlerScheduler(object):
             for aweme in aweme_list:
                 aweme['hostname'] = hostname
                 video_count += 1
-                self._join_download_queue(aweme, target_folder,target_desc_folder)
+                self._join_download_queue(aweme, target_folder, music_id)
             if res.get('has_more'):
                 cursor = res.get('cursor')
             else:
@@ -471,7 +495,6 @@ class CrawlerScheduler(object):
         headers['cookie'] = '_ga=GA1.2.1280899533.15586873031; _gid=GA1.2.2142818962.1559528881'
         res = requests.get(url,  headers=headers, params=params)
         content = res.content.decode('utf-8')
-        print(content)
         if not content:
             print('\n\nWeb Api Error: %s'
                   '\n\nheaders: %s'
@@ -520,7 +543,7 @@ def get_content(filename):
 
 
 if __name__ == "__main__":
-    content, opts, args = None, None, []
+    content, opts, args, usermap, realmap = None, None, [], {}, {}
 
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hi:o:", [
@@ -538,10 +561,13 @@ if __name__ == "__main__":
             content = get_content(arg)
 
     if content == None:
-        content = get_content("share-url.txt")
+        content = jsonutils.getData()
+        # get_content("share-url.txt")
 
     if len(content) == 0 or content[0] == "":
         usage()
         sys.exit(1)
 
+    # create table
+    ComUser.create_table()
     CrawlerScheduler(content)
