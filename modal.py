@@ -23,6 +23,7 @@ class ComUser(BaseModel):
     v_url = CharField()
     v_size = IntegerField(default=0)
     desc = CharField()
+    isupload = BooleanField(default=True)
 
     class Meta:
         table_name = 'com_user'
