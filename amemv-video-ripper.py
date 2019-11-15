@@ -332,8 +332,15 @@ class CrawlerScheduler(object):
         return video_count
 
     def _download_user_media(self, user_id, dytk, url):
+        user_url = realmap[url]
+        tags = usermap[user_url]["tags"]
+
         current_folder = os.getcwd()
-        target_folder = os.path.join(current_folder, 'download/%s' % user_id)
+        tags_folder = os.path.join(current_folder, 'download/%s' % tags)
+        if not os.path.isdir(tags_folder):
+            os.mkdir(tags_folder)
+            
+        target_folder = os.path.join(current_folder, 'download/%s/%s' % (tags, user_id))
         if not os.path.isdir(target_folder):
             os.mkdir(target_folder)
 
