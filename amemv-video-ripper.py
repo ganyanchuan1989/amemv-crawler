@@ -55,7 +55,7 @@ def getRemoteFileSize(url, proxy=None):
         return int(fileSize)
 
 
-def saveComUser(user_id, desc, v_url, v_size):
+def saveComUser(user_id, desc, v_url,v_uri, v_size):
     user = None
     for key in usermap:
         if(usermap[key]["user_id"] == user_id):
@@ -63,7 +63,7 @@ def saveComUser(user_id, desc, v_url, v_size):
             break
     try:
         ComUser(user_id=user_id, user_url=user["user_url"], real_url=user["real_url"],
-                tags=user["tags"], v_url=v_url, v_size=v_size, desc=desc).save()
+                tags=user["tags"], v_url=v_url, v_size=v_size, desc=desc, v_uri=v_uri).save()
         print('insert db successs')
     except:
         print('insert db error')
@@ -108,7 +108,7 @@ def download(medium_type, uri, medium_url, target_folder, desc, user_id):
                     fh.write(chunk)
             
             # todo save user
-            saveComUser(user_id, desc, medium_url, remoteSize)
+            saveComUser(user_id, desc, medium_url,uri, remoteSize)
 
             break
         except:
