@@ -62,8 +62,8 @@ def saveComUser(user_id, desc, v_url,v_uri, v_size):
             user = usermap[key]
             break
     try:
-        ComUser(user_id=user_id, user_url=user["user_url"], real_url=user["real_url"],
-                tags=user["tags"], v_url=v_url, v_size=v_size, desc=desc, v_uri=v_uri).save()
+        ComUser(user_id=user_id, user_url=user["user_url"], user_name=user["name"], real_url=user["real_url"],
+                tags=user["tags"], v_size=v_size, desc=desc, v_uri=v_uri).save()
         print('insert db successs')
     except:
         print('insert db error')
@@ -173,7 +173,7 @@ class CrawlerScheduler(object):
             if not url:
                 continue
             # todo user_url to real_url
-            usermap[user_url] = {"user_url": user_url, "real_url": url, "tags": items[i]['tags']}
+            usermap[user_url] = {"user_url": user_url, "real_url": url, "tags": items[i]['tags'], "name": items[i]['name']}
             # todo real_url to user_url
             realmap[url] = user_url
 
