@@ -73,6 +73,7 @@ def download(medium_type, uri, medium_url, target_folder, desc, user_id):
     # todo db is exist return
     query = ComUser.select().where((ComUser.user_id == user_id) & (ComUser.v_uri == uri))
     for pet in query:
+        print('record is exist %s' % uri)
         return
 
     headers = copy.deepcopy(HEADERS)
@@ -87,7 +88,7 @@ def download(medium_type, uri, medium_url, target_folder, desc, user_id):
         return
 
     file_path = os.path.join(target_folder, file_name)
-    remoteSize = getRemoteFileSize(medium_url)
+    # remoteSize = getRemoteFileSize(medium_url)
     # if os.path.isfile(file_path):
     #     remoteSize = getRemoteFileSize(medium_url)
     #     localSize = os.path.getsize(file_path)
@@ -106,9 +107,10 @@ def download(medium_type, uri, medium_url, target_folder, desc, user_id):
             with open(file_path, 'wb') as fh:
                 for chunk in resp.iter_content(chunk_size=1024):
                     fh.write(chunk)
-            
+
+            localSize = localSize = os.path.getsize(file_path)
             # todo save user
-            saveComUser(user_id, desc, medium_url,uri, remoteSize)
+            saveComUser(user_id, desc, medium_url,uri, localSize)
 
             break
         except:
